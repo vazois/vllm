@@ -336,11 +336,14 @@ class ExampleConnector(KVConnectorBase_V1):
         such that we load the KVs in the next forward pass.
         """
         if num_external_tokens > 0:
+            block_ids = blocks.get_block_ids()[0]
             logger.info(
                 "[KVDBG] update_state_after_alloc: req=%s queued for load "
-                "(num_external_tokens=%d)",
+                "(num_external_tokens=%d, %d block(s) allocated %s)",
                 request.request_id,
                 num_external_tokens,
+                len(block_ids),
+                block_ids,
             )
             self._requests_need_load[request.request_id] = request
 
@@ -371,6 +374,14 @@ class ExampleConnector(KVConnectorBase_V1):
                     is_store=False,
                     mm_hashes=mm_hashes,
                 )
+                logger.info(
+                    "[KVDBG] LOAD req=%s: requesting %d input block(s) %s "
+                    "for %d token(s)",
+                    new_req.req_id,
+                    len(new_req.block_ids[0]),
+                    new_req.block_ids[0],
+                    len(token_ids),
+                )
                 total_need_load += 1
             else:
                 # NOTE: here, we set the store and load being exclusive,
@@ -384,6 +395,14 @@ class ExampleConnector(KVConnectorBase_V1):
                         block_size=self._block_size,
                         is_store=True,
                         mm_hashes=mm_hashes,
+                    )
+                    logger.info(
+                        "[KVDBG] STORE req=%s: caching %d input block(s) %s "
+                        "for %d token(s)",
+                        new_req.req_id,
+                        len(new_req.block_ids[0]),
+                        new_req.block_ids[0],
+                        len(token_ids),
                     )
 
         cached_reqs = scheduler_output.scheduled_cached_reqs
