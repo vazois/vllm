@@ -172,6 +172,13 @@ class ExampleConnector(KVConnectorBase_V1):
                 "Inject KV cache of %d tokens to the paged memory",
                 len(request.slot_mapping),
             )
+            logger.info(
+                "[KVDBG] start_load_kv: loading %d tokens, folder=%s",
+                len(request.slot_mapping),
+                self._generate_foldername_debug(
+                    request.token_ids, request.mm_hashes, create_folder=False
+                ),
+            )
             for layer_name in forward_context.no_compile_layers:
                 layer = forward_context.no_compile_layers[layer_name]
 
@@ -253,6 +260,12 @@ class ExampleConnector(KVConnectorBase_V1):
                 filename = self._generate_filename_debug(
                     layer_name, request.token_ids, request.mm_hashes
                 )
+                logger.info(
+                    "[KVDBG] save_kv_layer: layer=%s tokens=%d file=%s",
+                    layer_name,
+                    len(request.slot_mapping),
+                    filename,
+                )
                 kv_cache = extract_kv_from_layer(kv_layer, request.slot_mapping)
                 with gpu_sync_allowed():
                     tensors = {"kv_cache": kv_cache.detach().cpu()}
@@ -286,7 +299,13 @@ class ExampleConnector(KVConnectorBase_V1):
         # NOTE: in current v1 scheduler, the num_computed_tokens is aligned
         # with the block granularity. And it expects the returned blocks and
         # num_computed_tokens to also be aligned with the block granularity.
+        logger.info(
+            "[KVDBG] get_num_new_matched_tokens: req=%s num_computed=%d",
+            request.request_id,
+            num_computed_tokens,
+        )
         if not self._found_match_for_request(request):
+            logger.info("[KVDBG] cache MISS for req=%s", request.request_id)
             return 0, False
 
         logger.info("External Cache Hit!")
@@ -296,6 +315,16 @@ class ExampleConnector(KVConnectorBase_V1):
         token_ids = request.prompt_token_ids or []
         num_tokens_to_check = align_to_block_size(len(token_ids) - 1, self._block_size)
 
+        logger.info(
+            "[KVDBG] cache HIT req=%s -> new_matched_tokens=%d folder=%s",
+            request.request_id,
+            num_tokens_to_check - num_computed_tokens,
+            self._generate_foldername_debug(
+                torch.tensor(token_ids)[:num_tokens_to_check],
+                [f.identifier for f in request.mm_features],
+                create_folder=False,
+            ),
+        )
         return num_tokens_to_check - num_computed_tokens, False
 
     def update_state_after_alloc(
@@ -307,6 +336,12 @@ class ExampleConnector(KVConnectorBase_V1):
         such that we load the KVs in the next forward pass.
         """
         if num_external_tokens > 0:
+            logger.info(
+                "[KVDBG] update_state_after_alloc: req=%s queued for load "
+                "(num_external_tokens=%d)",
+                request.request_id,
+                num_external_tokens,
+            )
             self._requests_need_load[request.request_id] = request
 
     def build_connector_meta(
@@ -383,6 +418,11 @@ class ExampleConnector(KVConnectorBase_V1):
             total_need_load += 1
 
         assert total_need_load == len(self._requests_need_load)
+        logger.info(
+            "[KVDBG] build_connector_meta: %d request(s) in meta (%d need load)",
+            len(meta.requests),
+            total_need_load,
+        )
         self._requests_need_load.clear()
         return meta
 
